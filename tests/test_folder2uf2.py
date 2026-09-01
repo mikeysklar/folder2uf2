@@ -3,6 +3,7 @@ import hashlib
 import os
 import plistlib
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -140,3 +141,55 @@ def test_mount_with_hdiutil(sample, tmp_path):
         assert h == hashlib.sha256(bytes(range(256)) * 400).hexdigest()
     finally:
         subprocess.run(["hdiutil", "detach", dev], capture_output=True)
+
+
+def test_combine_prepends_firmware_and_renumbers(tmp_path):
+    """--combine emits one UF2 whose blocks are numbered across both regions."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "code.py").write_text("print('hi')\n")
+
+    # a stand-in firmware UF2 at the start of flash
+    fw = tmp_path / "fw.uf2"
+    f2.write_uf2(str(fw), b"\xa5" * 8192, f2.XIP_BASE, f2.FAMILY_RP2040)
+
+    out = tmp_path / "combined.uf2"
+    assert f2.main(["--board", "adafruit_feather_rp2040", "--combine",
+                    str(fw), "-o", str(out), str(src)]) == 0
+
+    blocks, family = f2.read_uf2(str(out))
+    assert family == f2.FAMILY_RP2040
+    raw = out.read_bytes()
+    total = len(raw) // 512
+    for i in range(total):
+        _, _, _, _, _, no, tot, _ = struct.unpack("<IIIIIIII",
+                                                  raw[i * 512:i * 512 + 32])
+        assert no == i and tot == total
+    # firmware first, filesystem after, no overlap
+    fw_end = f2.XIP_BASE + 8192
+    assert blocks[0][0] == f2.XIP_BASE
+    assert any(a == f2.XIP_BASE + 0x100000 for a, _ in blocks)
+    assert all(a >= fw_end for a, _ in blocks if a >= f2.XIP_BASE + 0x100000)
+
+
+def test_combine_rejects_wrong_family(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "code.py").write_text("x\n")
+    fw = tmp_path / "fw.uf2"
+    f2.write_uf2(str(fw), b"\x00" * 4096, f2.XIP_BASE, f2.FAMILY_RP2350_ARM_S)
+    with pytest.raises(SystemExit):
+        f2.main(["--board", "adafruit_feather_rp2040", "--combine", str(fw),
+                 "-o", str(tmp_path / "o.uf2"), str(src)])
+
+
+def test_esp32_writes_raw_bin_not_uf2(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "code.py").write_text("print('esp')\n")
+    out = tmp_path / "fs.bin"
+    assert f2.main(["--board", "esp32_4mb", "-o", str(out), str(src)]) == 0
+    data = out.read_bytes()
+    assert data[:4] != struct.pack("<I", f2.UF2_MAGIC0)
+    # a bare FAT volume: BPB hidden-sectors is 1, matching the rp2 layout
+    assert struct.unpack("<I", data[0x1C:0x20])[0] == 1

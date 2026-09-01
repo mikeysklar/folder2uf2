@@ -119,3 +119,37 @@ jepler's archived [mkfatimg](https://github.com/jepler/mkfatimg)
 (C + oofatfs) explored the same folder-to-FAT-image direction for
 CircuitPython; this is an independent pure-Python implementation of the
 same idea, extended with the UF2 wrapper and board flash maps.
+
+## Shipping firmware and filesystem as one file
+
+`--combine` prepends a CircuitPython firmware UF2, so a customer flashes one
+file instead of two. The two regions do not overlap (firmware from
+`0x10000000`, the drive from `CIRCUITPY_FIRMWARE_SIZE + 4K`), and UF2 blocks
+each carry their own target address, so the blocks are simply renumbered
+across the combined file.
+
+```sh
+folder2uf2 --board adafruit_feather_rp2040 \
+           --combine firmware.uf2 -o product.uf2 myproject/
+```
+
+The family id of the firmware UF2 must match the board, which is checked, and
+the firmware must end before the drive starts.
+
+## ESP32
+
+tinyuf2 on ESP32 only writes the `ota_0` partition, so a UF2 cannot place a
+filesystem image. The `esp32_*` targets therefore write a raw image for
+`esptool` instead, using the `user_fs` data/fat partition from
+`ports/espressif/esp-idf-config/partitions-*.csv`:
+
+| target | offset | size |
+|---|---|---|
+| `esp32_4mb` | `0x310000` | 960K |
+| `esp32_8mb` | `0x450000` | 3776K |
+| `esp32_16mb` | `0x450000` | 11968K |
+
+```sh
+folder2uf2 --board esp32_4mb -o fs.bin myproject/
+esptool.py write_flash 0x310000 fs.bin
+```

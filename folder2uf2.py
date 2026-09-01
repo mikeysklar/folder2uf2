@@ -52,6 +52,16 @@ BOARDS = {
     "adafruit_fruit_jam": (FAMILY_RP2350_ARM_S, 0x100000, 16 * 1024 * 1024),
 }
 
+# Espressif boards keep the CIRCUITPY drive in the "user_fs" data/fat
+# partition, from ports/espressif/esp-idf-config/partitions-*.csv. tinyuf2 on
+# ESP32 only writes ota_0, so these produce a raw image for esptool rather
+# than a UF2. Keyed by flash size.
+ESP_PARTITIONS = {
+    "esp32_4mb": (0x310000, 960 * 1024),
+    "esp32_8mb": (0x450000, 3776 * 1024),
+    "esp32_16mb": (0x450000, 11968 * 1024),
+}
+
 MAX_FAT12 = 0xFF5
 MAX_FAT16 = 0xFFF5
 
@@ -452,25 +462,58 @@ class FatBuilder:
         return off
 
 
-def write_uf2(path, image, target_addr, family_id, trim_to=None):
+def image_blocks(image, target_addr, trim_to=None):
+    """Split an image into (address, payload) UF2 block payloads."""
     data = image if trim_to is None else image[:trim_to]
     # pad to erase-sector (4K) boundary so the bootloader erases/writes
     # whole sectors deterministically
     pad = (-len(data)) % 4096
     data = bytes(data) + b"\xff" * pad
-    nblocks = (len(data) + UF2_PAYLOAD - 1) // UF2_PAYLOAD
+    n = (len(data) + UF2_PAYLOAD - 1) // UF2_PAYLOAD
+    return [(target_addr + i * UF2_PAYLOAD,
+             data[i * UF2_PAYLOAD:(i + 1) * UF2_PAYLOAD]) for i in range(n)]
+
+
+def read_uf2(path):
+    """Return (blocks, family_id) from an existing UF2 file."""
+    raw = open(path, "rb").read()
+    if len(raw) % SECTOR:
+        raise ValueError("%s is not a whole number of 512-byte UF2 blocks"
+                         % path)
+    blocks = []
+    family = None
+    for i in range(len(raw) // SECTOR):
+        b = raw[i * SECTOR:(i + 1) * SECTOR]
+        m0, m1, flags, addr, size, _no, _total, fam = struct.unpack(
+            "<IIIIIIII", b[:32])
+        if m0 != UF2_MAGIC0 or m1 != UF2_MAGIC1:
+            raise ValueError("%s: block %d has a bad UF2 magic" % (path, i))
+        if flags & UF2_FLAG_FAMILY_ID:
+            if family is not None and fam != family:
+                raise ValueError("%s mixes family ids 0x%08x and 0x%08x"
+                                 % (path, family, fam))
+            family = fam
+        blocks.append((addr, b[32:32 + size]))
+    return blocks, family
+
+
+def write_uf2_blocks(path, blocks, family_id):
+    """Write blocks as one UF2, numbering them across the whole file."""
+    total = len(blocks)
     with open(path, "wb") as f:
-        for i in range(nblocks):
-            chunk = data[i * UF2_PAYLOAD:(i + 1) * UF2_PAYLOAD]
-            block = struct.pack(
+        for i, (addr, chunk) in enumerate(blocks):
+            head = struct.pack(
                 "<IIIIIIII",
                 UF2_MAGIC0, UF2_MAGIC1, UF2_FLAG_FAMILY_ID,
-                target_addr + i * UF2_PAYLOAD,
-                UF2_PAYLOAD, i, nblocks, family_id)
-            block += chunk.ljust(476, b"\x00")
-            block += struct.pack("<I", UF2_MAGIC_END)
-            f.write(block)
-    return nblocks
+                addr, len(chunk), i, total, family_id)
+            f.write(head + chunk.ljust(476, b"\x00")
+                    + struct.pack("<I", UF2_MAGIC_END))
+    return total
+
+
+def write_uf2(path, image, target_addr, family_id, trim_to=None):
+    return write_uf2_blocks(
+        path, image_blocks(image, target_addr, trim_to), family_id)
 
 
 def parse_size(s):
@@ -485,8 +528,12 @@ def main(argv=None):
     p.add_argument("source", nargs="?", help="folder to pack")
     p.add_argument("-o", "--output", help="output UF2 path (default: "
                    "<source>.uf2)")
-    p.add_argument("--board", choices=sorted(BOARDS),
-                   help="board name (sets flash offset, size, family id)")
+    p.add_argument("--board", choices=sorted(BOARDS) + sorted(ESP_PARTITIONS),
+                   help="board name (sets flash offset, size, family id). "
+                   "esp32_* targets write a raw image for esptool, not a UF2")
+    p.add_argument("--combine", metavar="FIRMWARE.UF2",
+                   help="prepend a firmware UF2 so one file flashes both "
+                   "firmware and filesystem")
     p.add_argument("--flash-offset", type=parse_size,
                    help="CIRCUITPY drive start offset in flash (e.g. "
                    "0x100000)")
@@ -519,12 +566,37 @@ def main(argv=None):
         for name, (fam, off, tot) in sorted(BOARDS.items()):
             print("%-28s family=0x%08x offset=0x%06x fs_size=%.1fMB"
                   % (name, fam, off, (tot - off) / 1e6))
+        for name, (off, size) in sorted(ESP_PARTITIONS.items()):
+            print("%-28s esptool     offset=0x%06x fs_size=%.1fMB"
+                  % (name, off, size / 1e6))
         return 0
 
     if not args.source:
         p.error("source folder is required")
     if not os.path.isdir(args.source):
         p.error("source %r is not a directory" % args.source)
+
+    esp = args.board in ESP_PARTITIONS if args.board else False
+    if esp:
+        if args.combine:
+            p.error("--combine is UF2 only; ESP32 images are flashed with "
+                    "esptool")
+        offset, fs_size = ESP_PARTITIONS[args.board]
+        if args.fs_size is not None:
+            fs_size = args.fs_size
+        geo = Geometry(fs_size // SECTOR)
+        root = build_tree(args.source, extra_files=not args.no_extra_files)
+        fb = FatBuilder(geo, label=args.label, volume_id=args.volume_id)
+        fb.layout(root)
+        out = args.output or os.path.basename(
+            os.path.abspath(args.source)) + ".bin"
+        data = fb.image if args.full else fb.image[:fb.used_bytes()]
+        with open(out, "wb") as f:
+            f.write(data)
+        print("%s: FAT%d, %d bytes of %d, partition offset 0x%06x"
+              % (out, geo.fat_type, len(data), fs_size, offset))
+        print("flash with: esptool.py write_flash 0x%06x %s" % (offset, out))
+        return 0
 
     family = args.family_id
     offset = args.flash_offset
@@ -554,8 +626,22 @@ def main(argv=None):
     out = args.output or os.path.basename(
         os.path.abspath(args.source)) + ".uf2"
     trim = None if args.full else fb.used_bytes()
-    nblocks = write_uf2(out, fb.image, args.base_addr + offset, family,
-                        trim_to=trim)
+    fs_addr = args.base_addr + offset
+    blocks = image_blocks(fb.image, fs_addr, trim_to=trim)
+
+    if args.combine:
+        fw_blocks, fw_family = read_uf2(args.combine)
+        if fw_family is not None and fw_family != family:
+            p.error("firmware family 0x%08x does not match 0x%08x; wrong "
+                    "board?" % (fw_family, family))
+        fw_end = max(a + len(c) for a, c in fw_blocks)
+        if fw_end > fs_addr:
+            p.error("firmware reaches 0x%08x, past the filesystem start "
+                    "0x%08x" % (fw_end, fs_addr))
+        blocks = fw_blocks + blocks
+        print("combined: %d firmware blocks + %d filesystem blocks"
+              % (len(fw_blocks), len(blocks) - len(fw_blocks)))
+    nblocks = write_uf2_blocks(out, blocks, family)
     if args.img_out:
         with open(args.img_out, "wb") as f:
             f.write(fb.image)
@@ -563,10 +649,10 @@ def main(argv=None):
     print("%s: FAT%d, %d sectors/cluster, %d clusters, %.0fKB used of "
           "%.0fKB" % (out, geo.fat_type, geo.sectors_per_cluster,
                       geo.cluster_count, used_kb, fs_size / 1024))
+    lo = min(a for a, _ in blocks)
+    hi = max(a + len(c) for a, c in blocks)
     print("UF2: %d blocks, flash 0x%08x..0x%08x, family 0x%08x"
-          % (nblocks, args.base_addr + offset,
-             args.base_addr + offset + nblocks * UF2_PAYLOAD,
-             family))
+          % (nblocks, lo, hi, family))
     return 0
 
 
