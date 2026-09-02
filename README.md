@@ -8,7 +8,7 @@ Ships a CircuitPython project as one file, so customers copy once.
 
 Python 3, standard library only. No dependencies.
 
-## Two ways to ship
+## Three ways to ship
 
 | Output | Goes onto | Board must be |
 |---|---|---|
@@ -16,17 +16,27 @@ Python 3, standard library only. No dependencies.
 | `.uf2` | `RPI-RP2`, `RP2350` | in the UF2 bootloader |
 | `.bin` | flashed by esptool | ESP32, any state |
 
-## Single file, no bootloader
+## Self-extract: one file, no bootloader
+
+Pack the project. Output must be `code.py`, the name CircuitPython runs.
 
 ```sh
 folder2uf2 --self-extract -o code.py myproject/
 ```
 
-Drag onto CIRCUITPY. It unpacks and reboots. Works on every port.
+### What your customer does
 
 ```
-must be named code.py, that is what CircuitPython runs
+1. drag code.py onto CIRCUITPY
+2. CIRCUITPY disappears for about 4 seconds
+3. board reboots with code.py, lib/ and assets in place
 ```
+
+Works on every port, RP2 and ESP32 alike.
+
+### If it fails
+
+The drive is handed back with an error. Nobody gets locked out.
 
 ### How it works
 
