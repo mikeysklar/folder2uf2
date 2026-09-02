@@ -40,13 +40,19 @@ def _mkdirs(path):
 
 
 def _members():
-    """Yield (path, data) one at a time, holding only one member in RAM."""
+    """Yield (path, data) one at a time, holding only one member in RAM.
+
+    Base64 is decoded line by line into a bytearray. Joining the lines into
+    one string first costs an extra 4/3 of the compressed size, which
+    overflows a 264KB RP2040 well before the decompression itself would.
+    """
     with open("/code.py", "r") as f:
         for line in f:
             if line.rstrip("\\n") == MARKER:
                 break
         path = None
-        chunks = []
+        buf = None
+        pos = 0
         for line in f:
             line = line.rstrip("\\n")
             if not line.startswith("#"):
@@ -54,14 +60,20 @@ def _members():
             body = line[1:]
             if body.startswith(">"):
                 if path is not None:
-                    yield path, zlib.decompress(
-                        binascii.a2b_base64("".join(chunks)))
-                path = body[1:]
-                chunks = []
+                    # memoryview slice, so the exact length is passed
+                    # without copying the buffer
+                    yield path, zlib.decompress(memoryview(buf)[:pos])
+                n, _, path = body[1:].partition("|")
+                # preallocate: growing a bytearray reallocates and the spike
+                # is what overflows a 264KB RP2040
+                buf = bytearray((int(n) * 3) // 4 + 3)
+                pos = 0
             elif path is not None:
-                chunks.append(body)
+                chunk = binascii.a2b_base64(body)
+                buf[pos:pos + len(chunk)] = chunk
+                pos += len(chunk)
         if path is not None:
-            yield path, zlib.decompress(binascii.a2b_base64("".join(chunks)))
+            yield path, zlib.decompress(memoryview(buf)[:pos])
 
 
 print("folder2uf2 installer: unpacking")
@@ -69,24 +81,32 @@ print("folder2uf2 installer: unpacking")
 time.sleep({settle})
 storage.unsafe_disable_usb_drive()
 
-deferred = None
-count = 0
-for path, data in _members():
-    if path == "code.py":
-        deferred = data
-        continue
-    _mkdirs(path)
-    with open("/" + path, "wb") as out:
-        out.write(data)
-    count += 1
-    print("  " + path)
+try:
+    deferred = None
+    count = 0
+    for path, data in _members():
+        if path == "code.py":
+            deferred = data
+            continue
+        _mkdirs(path)
+        with open("/" + path, "wb") as out:
+            out.write(data)
+        count += 1
+        print("  " + path)
 
-# code.py last: until it lands, a crash leaves the installer intact and rerunnable.
-if deferred is not None:
-    with open("/code.py.new", "wb") as out:
-        out.write(deferred)
-    os.rename("/code.py.new", "/code.py")
-    count += 1
+    # code.py last: until it lands, a crash leaves the installer rerunnable.
+    if deferred is not None:
+        with open("/code.py.new", "wb") as out:
+            out.write(deferred)
+        os.rename("/code.py.new", "/code.py")
+        count += 1
+except Exception as e:  # noqa: BLE001 - must not strand the user
+    # Give the drive back, or CIRCUITPY stays hidden and the installer
+    # reruns and fails on every boot, locking the user out entirely.
+    print("install failed:", e)
+    print("re-enabling CIRCUITPY so you can remove this file")
+    storage.enable_usb_drive()
+    raise
 
 print("unpacked %d files, resetting" % count)
 time.sleep(0.5)
@@ -107,7 +127,7 @@ def build(src, settle=3.0, wrap=120):
         total_raw += len(raw)
         biggest = max(biggest, len(raw))
         blob = base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
-        out.append("#>" + path.replace(os.sep, "/"))
+        out.append("#>%d|%s" % (len(blob), path.replace(os.sep, "/")))
         for i in range(0, len(blob), wrap):
             out.append("#" + blob[i:i + wrap])
     return "\n".join(out) + "\n", total_raw, biggest
