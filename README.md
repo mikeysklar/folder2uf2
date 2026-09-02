@@ -36,14 +36,12 @@ esptool --before no-reset --after no-reset write-flash 0x450000 fs.bin
 
 ### Storage extend
 
-Layouts differ per board, so read the table off your chip.
+Layouts differ, so read the table off your chip.
 
 ```sh
 esptool --before no-reset --after no-reset read-flash 0x8000 0xc00 pt.bin
 folder2uf2 --board esp32_16mb --partition-table pt.bin --storage-extend -o fs.bin src/
 ```
-
-CircuitPython may span the fat partition plus a spare OTA slot.
 
 ```c
 storage_extended = (_partition[0]->size < fatfs_bytes());
