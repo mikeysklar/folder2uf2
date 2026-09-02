@@ -55,11 +55,19 @@ BOARDS = {
 # Espressif boards keep the CIRCUITPY drive in the "user_fs" data/fat
 # partition, from ports/espressif/esp-idf-config/partitions-*.csv. tinyuf2 on
 # ESP32 only writes ota_0, so these produce a raw image for esptool rather
-# than a UF2. Keyed by flash size.
+# than a UF2. Keyed by flash size: (offset, user_fs size, ota_1 size).
+#
+# With CIRCUITPY_STORAGE_EXTEND (default on espressif, tied to
+# CIRCUITPY_DUALBANK) the filesystem spans user_fs PLUS the spare OTA
+# partition: supervisor_flash_get_block_count() returns
+# (_partition[0]->size + _partition[1]->size). The port decides at boot with
+#     storage_extended = (_partition[0]->size < fatfs_bytes());
+# so a filesystem sized to user_fs alone silently turns extension OFF and
+# shrinks the drive. Size to the extended total unless --no-storage-extend.
 ESP_PARTITIONS = {
-    "esp32_4mb": (0x310000, 960 * 1024),
-    "esp32_8mb": (0x450000, 3776 * 1024),
-    "esp32_16mb": (0x450000, 11968 * 1024),
+    "esp32_4mb": (0x310000, 960 * 1024, 1408 * 1024),
+    "esp32_8mb": (0x450000, 3776 * 1024, 2048 * 1024),
+    "esp32_16mb": (0x450000, 11968 * 1024, 2048 * 1024),
 }
 
 MAX_FAT12 = 0xFF5
@@ -557,6 +565,9 @@ def main(argv=None):
     p.add_argument("--no-extra-files", action="store_true",
                    help="skip the .fseventsd/.metadata_never_index/"
                    ".Trashes files CircuitPython normally creates")
+    p.add_argument("--no-storage-extend", action="store_true",
+                   help="ESP32: size the filesystem to the user_fs partition "
+                   "only, for builds without CIRCUITPY_STORAGE_EXTEND")
     p.add_argument("--img-out", help="also write the raw FAT image here")
     p.add_argument("--list-boards", action="store_true",
                    help="list built-in boards and exit")
@@ -566,9 +577,10 @@ def main(argv=None):
         for name, (fam, off, tot) in sorted(BOARDS.items()):
             print("%-28s family=0x%08x offset=0x%06x fs_size=%.1fMB"
                   % (name, fam, off, (tot - off) / 1e6))
-        for name, (off, size) in sorted(ESP_PARTITIONS.items()):
-            print("%-28s esptool     offset=0x%06x fs_size=%.1fMB"
-                  % (name, off, size / 1e6))
+        for name, (off, size, ota) in sorted(ESP_PARTITIONS.items()):
+            print("%-28s esptool     offset=0x%06x fs_size=%.1fMB "
+                  "(%.1fMB without storage extend)"
+                  % (name, off, (size + ota) / 1e6, size / 1e6))
         return 0
 
     if not args.source:
@@ -581,7 +593,8 @@ def main(argv=None):
         if args.combine:
             p.error("--combine is UF2 only; ESP32 images are flashed with "
                     "esptool")
-        offset, fs_size = ESP_PARTITIONS[args.board]
+        offset, part_size, ota_size = ESP_PARTITIONS[args.board]
+        fs_size = part_size if args.no_storage_extend else part_size + ota_size
         if args.fs_size is not None:
             fs_size = args.fs_size
         geo = Geometry(fs_size // SECTOR)
@@ -593,8 +606,9 @@ def main(argv=None):
         data = fb.image if args.full else fb.image[:fb.used_bytes()]
         with open(out, "wb") as f:
             f.write(data)
-        print("%s: FAT%d, %d bytes of %d, partition offset 0x%06x"
-              % (out, geo.fat_type, len(data), fs_size, offset))
+        print("%s: FAT%d, %d bytes, volume %dK at offset 0x%06x%s"
+              % (out, geo.fat_type, len(data), fs_size // 1024, offset,
+                 "" if args.no_storage_extend else " (storage extended)"))
         print("flash with: esptool.py write_flash 0x%06x %s" % (offset, out))
         return 0
 
