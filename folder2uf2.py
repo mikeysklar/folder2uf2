@@ -603,6 +603,10 @@ def main(argv=None):
                    "partition, matching CIRCUITPY_STORAGE_EXTEND. Requires "
                    "--partition-table")
     p.add_argument("--img-out", help="also write the raw FAT image here")
+    p.add_argument("--self-extract", action="store_true",
+                   help="emit a single self-extracting code.py instead of an "
+                   "image. Drag it onto CIRCUITPY and it unpacks itself. "
+                   "Works on any port, no bootloader or esptool needed")
     p.add_argument("--list-boards", action="store_true",
                    help="list built-in boards and exit")
     args = p.parse_args(argv)
@@ -614,6 +618,19 @@ def main(argv=None):
         for name, (off, size) in sorted(ESP_PARTITIONS.items()):
             print("%-28s esptool     offset=0x%06x fs_size=%.1fMB"
                   % (name, off, size / 1e6))
+        return 0
+
+    if args.self_extract:
+        import selfextract
+        text, raw, biggest = selfextract.build(args.source)
+        out = args.output or "code.py"
+        with open(out, "w") as f:
+            f.write(text)
+        print("%s: %d files, %d bytes of source packed into %d bytes"
+              % (out, text.count("\n#>"), raw, len(text)))
+        print("largest single file %d bytes, which bounds RAM on the board"
+              % biggest)
+        print("drag onto CIRCUITPY; it unpacks and reboots")
         return 0
 
     if not args.source:

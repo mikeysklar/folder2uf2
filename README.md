@@ -62,6 +62,31 @@ Takes a file and an offset, so customers need no Python.
 
 <https://adafruit.github.io/Adafruit_WebSerial_ESPTool/>
 
+## Single file, no bootloader
+
+```sh
+folder2uf2 --self-extract -o code.py myproject/
+```
+
+Drag that onto CIRCUITPY. It unpacks and reboots. Same on every port.
+
+### How it works
+
+`storage.unsafe_disable_usb_drive()` makes CIRCUITPY writable from `code.py`.
+
+```python
+# payload rides in trailing comments, inflated one file at a time
+# peak RAM is the largest single file, not the whole tree
+```
+
+### Limits
+
+Needs CircuitPython installed already. CIRCUITPY vanishes while it runs.
+
+```
+zlib required: default wherever CIRCUITPY_FULL_BUILD is set
+```
+
 ## How it was tested
 
 ### Metro RP2350, before
@@ -87,6 +112,17 @@ lib import works
 ### Restore
 
 A second combined UF2. 108 files verified identical.
+
+### Self-extract, Metro RP2350
+
+```
+60144 bytes of source packed into 83952 bytes
+assets.bin 60000 bytes, md5 matched
+lib/mypkg/__init__.py created
+code.py replaced by the product
+```
+
+Drive returned on its own. Board restored, 113 files identical.
 
 ### Metro ESP32-S3
 
