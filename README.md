@@ -52,6 +52,16 @@ storage_extended = (_partition[0]->size < fatfs_bytes());
 
 One-shot: one esptool run per entry, then power cycle.
 
+### Bootloader
+
+Install the tinyuf2 bootloader first, per your board's learn guide.
+
+### Browser instead of esptool
+
+Takes a file and an offset, so customers need no Python.
+
+<https://adafruit.github.io/Adafruit_WebSerial_ESPTool/>
+
 ## How it was tested
 
 ### Metro RP2350, before
