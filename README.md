@@ -36,21 +36,15 @@ esptool --before no-reset --after no-reset write-flash 0x450000 fs.bin
 
 ### Storage extend
 
-CircuitPython spans `user_fs` plus the spare OTA partition.
+Images span `user_fs` plus the spare OTA partition. `--no-storage-extend` disables.
 
 ```c
 storage_extended = (_partition[0]->size < fatfs_bytes());
 ```
 
-Sizing to `user_fs` alone shrinks the drive 2MB.
-
-Use `--no-storage-extend` for builds without it.
-
 ### Download mode
 
-One-shot, and USB-OTG has no reset line.
-
-Run one esptool invocation per entry, then power cycle.
+One-shot: one esptool run per entry, then power cycle.
 
 ## How it was tested
 
@@ -85,13 +79,12 @@ Adafruit CircuitPython 10.3.0 on 2026-08-31; Adafruit Metro ESP32S3 with ESP32S3
 Board ID:adafruit_metro_esp32s3
 ```
 
-Partition table read from the chip.
+Read from the chip. Wrote 43520 bytes, hash verified.
 
 ```
 ffat  data fat  0x450000  0xBB0000  11968K
+volume 28032 sectors, files intact
 ```
-
-Wrote 43520 bytes, hash verified. Volume 28032 sectors.
 
 ## Safety
 
