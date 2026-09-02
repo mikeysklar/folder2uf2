@@ -115,7 +115,7 @@ A second combined UF2. 108 files verified identical.
 
 ### Self-extract, both families
 
-Same installer dragged onto a Metro RP2350 and a Metro ESP32-S3.
+One installer, dragged onto both boards.
 
 ```
 Adafruit CircuitPython 10.3.0 on 2026-08-31; Adafruit Metro RP2350 with rp2350b
@@ -127,7 +127,7 @@ lib/mypkg/__init__.py created, nested dir
 code.py replaced by the product
 ```
 
-Drive returned on its own. Both boards restored, all files identical.
+Drive returned unaided. Both boards restored, files identical.
 
 ### Metro ESP32-S3
 
