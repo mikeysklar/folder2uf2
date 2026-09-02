@@ -113,16 +113,21 @@ lib import works
 
 A second combined UF2. 108 files verified identical.
 
-### Self-extract, Metro RP2350
+### Self-extract, both families
+
+Same installer dragged onto a Metro RP2350 and a Metro ESP32-S3.
 
 ```
+Adafruit CircuitPython 10.3.0 on 2026-08-31; Adafruit Metro RP2350 with rp2350b
+Adafruit CircuitPython 10.3.0 on 2026-08-31; Adafruit Metro ESP32S3 with ESP32S3
+
 60144 bytes of source packed into 83952 bytes
-assets.bin 60000 bytes, md5 matched
-lib/mypkg/__init__.py created
+assets.bin 60000 bytes, md5 matched on both
+lib/mypkg/__init__.py created, nested dir
 code.py replaced by the product
 ```
 
-Drive returned on its own. Board restored, 113 files identical.
+Drive returned on its own. Both boards restored, all files identical.
 
 ### Metro ESP32-S3
 
