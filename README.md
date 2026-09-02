@@ -39,16 +39,16 @@ esptool write-flash 0x310000 fs.bin
 ### Metro RP2350, before
 
 ```
-Adafruit CircuitPython 10.3.0 on 2026-08-31; Adafruit Metro RP2350 with rp2350b
+Adafruit CircuitPython 10.3.0-alpha.4 on 2026-07-23; Adafruit Metro RP2350 with rp2350b
 Board ID:adafruit_metro_rp2350
 ```
 
 ### After one combined UF2
 
-Firmware and filesystem both changed.
+Carrying the 10.3.0 release. Both regions changed.
 
 ```
-Adafruit CircuitPython 10.3.0-alpha.4 on 2026-07-23; Adafruit Metro RP2350 with rp2350b
+Adafruit CircuitPython 10.3.0 on 2026-08-31; Adafruit Metro RP2350 with rp2350b
 Board ID:adafruit_metro_rp2350
 
 code.py output:
