@@ -115,7 +115,7 @@ A second combined UF2. 108 files verified identical.
 
 ### Self-extract, both families
 
-One installer, dragged onto both boards.
+One installer, both boards.
 
 ```
 Adafruit CircuitPython 10.3.0 on 2026-08-31; Adafruit Metro RP2350 with rp2350b
