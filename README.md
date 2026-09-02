@@ -42,14 +42,15 @@ CircuitPython spans `user_fs` plus the spare OTA partition.
 storage_extended = (_partition[0]->size < fatfs_bytes());
 ```
 
-Sizing to `user_fs` alone turns that off, shrinking the drive 2MB.
+Sizing to `user_fs` alone shrinks the drive 2MB.
+
 Use `--no-storage-extend` for builds without it.
 
 ### Download mode
 
 One-shot, and USB-OTG has no reset line.
 
-One esptool invocation per entry, then power cycle the port.
+Run one esptool invocation per entry, then power cycle.
 
 ## How it was tested
 
@@ -90,7 +91,7 @@ Partition table read from the chip.
 ffat  data fat  0x450000  0xBB0000  11968K
 ```
 
-Wrote 43520 bytes, hash verified. Volume 28032 sectors, files intact.
+Wrote 43520 bytes, hash verified. Volume 28032 sectors.
 
 ## Safety
 
