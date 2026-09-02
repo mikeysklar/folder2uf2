@@ -193,3 +193,29 @@ def test_esp32_writes_raw_bin_not_uf2(tmp_path):
     assert data[:4] != struct.pack("<I", f2.UF2_MAGIC0)
     # a bare FAT volume: BPB hidden-sectors is 1, matching the rp2 layout
     assert struct.unpack("<I", data[0x1C:0x20])[0] == 1
+
+
+def test_partition_table_from_real_hardware():
+    """Dumps read off a Metro ESP32-S3 and a Metro ESP32-S2 at 0x8000."""
+    here = os.path.dirname(__file__)
+
+    off, size, ota = f2.parse_partition_table(
+        os.path.join(here, "pt_esp32s3_16mb.bin"))
+    assert (off, size, ota) == (0x450000, 11968 * 1024, 2048 * 1024)
+    # the board reported 28032 sectors, i.e. fat + spare ota
+    assert (size + ota) // 512 == 28032
+
+    off, size, ota = f2.parse_partition_table(
+        os.path.join(here, "pt_esp32s2_4mb.bin"))
+    assert (off, size, ota) == (0x310000, 960 * 1024, 0)
+    # no spare OTA slot, so no extension; the board reported 1920 sectors
+    assert size // 512 == 1920
+
+
+def test_storage_extend_requires_a_partition_table(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "code.py").write_text("x\n")
+    with pytest.raises(SystemExit):
+        f2.main(["--board", "esp32_16mb", "--storage-extend",
+                 "-o", str(tmp_path / "fs.bin"), str(src)])

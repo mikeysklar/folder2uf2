@@ -52,23 +52,53 @@ BOARDS = {
     "adafruit_fruit_jam": (FAMILY_RP2350_ARM_S, 0x100000, 16 * 1024 * 1024),
 }
 
-# Espressif boards keep the CIRCUITPY drive in the "user_fs" data/fat
-# partition, from ports/espressif/esp-idf-config/partitions-*.csv. tinyuf2 on
-# ESP32 only writes ota_0, so these produce a raw image for esptool rather
-# than a UF2. Keyed by flash size: (offset, user_fs size, ota_1 size).
+# Espressif boards keep the CIRCUITPY drive in a data/fat partition. tinyuf2
+# on ESP32 only writes ota_0, so these produce a raw image for esptool rather
+# than a UF2. Values are (offset, size) from
+# ports/espressif/esp-idf-config/partitions-*.csv, sized to the fat partition
+# ALONE, which is always safe.
 #
-# With CIRCUITPY_STORAGE_EXTEND (default on espressif, tied to
-# CIRCUITPY_DUALBANK) the filesystem spans user_fs PLUS the spare OTA
-# partition: supervisor_flash_get_block_count() returns
+# Real boards vary, so prefer --partition-table with a dump read off the chip:
+#   esptool --before no-reset --after no-reset read-flash 0x8000 0xc00 pt.bin
+# A Metro ESP32-S3 16MB has ffat 11968K plus an ota_1 to extend into; a Metro
+# ESP32-S2 4MB has ffat 960K and no ota_1 at all.
+#
+# With CIRCUITPY_STORAGE_EXTEND the filesystem may span the fat partition PLUS
+# the spare OTA partition, since supervisor_flash_get_block_count() returns
 # (_partition[0]->size + _partition[1]->size). The port decides at boot with
 #     storage_extended = (_partition[0]->size < fatfs_bytes());
-# so a filesystem sized to user_fs alone silently turns extension OFF and
-# shrinks the drive. Size to the extended total unless --no-storage-extend.
+# so sizing to the fat partition alone turns extension off and gives a smaller
+# drive, while over-sizing writes a filesystem that runs past its partition.
+# Use --storage-extend WITH --partition-table to size it correctly.
 ESP_PARTITIONS = {
-    "esp32_4mb": (0x310000, 960 * 1024, 1408 * 1024),
-    "esp32_8mb": (0x450000, 3776 * 1024, 2048 * 1024),
-    "esp32_16mb": (0x450000, 11968 * 1024, 2048 * 1024),
+    "esp32_4mb": (0x310000, 960 * 1024),
+    "esp32_8mb": (0x450000, 3776 * 1024),
+    "esp32_16mb": (0x450000, 11968 * 1024),
 }
+
+
+def parse_partition_table(path):
+    """Parse an esp-idf partition table dump. Returns (fat_offset, fat_size,
+    next_ota_size). next_ota_size is 0 when the table has no spare OTA slot."""
+    d = open(path, "rb").read()
+    fat = None
+    otas = []
+    for i in range(0, len(d) - 32, 32):
+        e = d[i:i + 32]
+        if e[:2] != b"\xaa\x50":
+            break
+        _, ptype, subtype, off, size, raw, _ = struct.unpack("<HBBII16sI", e)
+        name = raw.rstrip(b"\x00").decode("ascii", "replace")
+        if ptype == 1 and subtype == 0x81:      # data, fat
+            fat = (off, size, name)
+        elif ptype == 0 and 0x10 <= subtype <= 0x1f:  # app, ota_N
+            otas.append((subtype, off, size, name))
+    if fat is None:
+        raise ValueError("%s has no data/fat partition" % path)
+    # CircuitPython extends into the *next* OTA slot, which only exists when
+    # the table defines more than one.
+    next_ota = sorted(otas)[1][2] if len(otas) > 1 else 0
+    return fat[0], fat[1], next_ota
 
 MAX_FAT12 = 0xFF5
 MAX_FAT16 = 0xFFF5
@@ -565,9 +595,13 @@ def main(argv=None):
     p.add_argument("--no-extra-files", action="store_true",
                    help="skip the .fseventsd/.metadata_never_index/"
                    ".Trashes files CircuitPython normally creates")
-    p.add_argument("--no-storage-extend", action="store_true",
-                   help="ESP32: size the filesystem to the user_fs partition "
-                   "only, for builds without CIRCUITPY_STORAGE_EXTEND")
+    p.add_argument("--partition-table", metavar="PT.BIN",
+                   help="ESP32: derive offset and size from a partition table "
+                   "read off the chip at 0x8000")
+    p.add_argument("--storage-extend", action="store_true",
+                   help="ESP32: extend the filesystem into the spare OTA "
+                   "partition, matching CIRCUITPY_STORAGE_EXTEND. Requires "
+                   "--partition-table")
     p.add_argument("--img-out", help="also write the raw FAT image here")
     p.add_argument("--list-boards", action="store_true",
                    help="list built-in boards and exit")
@@ -577,10 +611,9 @@ def main(argv=None):
         for name, (fam, off, tot) in sorted(BOARDS.items()):
             print("%-28s family=0x%08x offset=0x%06x fs_size=%.1fMB"
                   % (name, fam, off, (tot - off) / 1e6))
-        for name, (off, size, ota) in sorted(ESP_PARTITIONS.items()):
-            print("%-28s esptool     offset=0x%06x fs_size=%.1fMB "
-                  "(%.1fMB without storage extend)"
-                  % (name, off, (size + ota) / 1e6, size / 1e6))
+        for name, (off, size) in sorted(ESP_PARTITIONS.items()):
+            print("%-28s esptool     offset=0x%06x fs_size=%.1fMB"
+                  % (name, off, size / 1e6))
         return 0
 
     if not args.source:
@@ -593,8 +626,20 @@ def main(argv=None):
         if args.combine:
             p.error("--combine is UF2 only; ESP32 images are flashed with "
                     "esptool")
-        offset, part_size, ota_size = ESP_PARTITIONS[args.board]
-        fs_size = part_size if args.no_storage_extend else part_size + ota_size
+        offset, part_size = ESP_PARTITIONS[args.board]
+        ota_size = 0
+        if args.partition_table:
+            offset, part_size, ota_size = parse_partition_table(
+                args.partition_table)
+        fs_size = part_size
+        if args.storage_extend:
+            if not args.partition_table:
+                p.error("--storage-extend needs --partition-table, since the "
+                        "spare OTA partition size varies by board")
+            if not ota_size:
+                p.error("this partition table has no spare OTA slot, so "
+                        "storage cannot extend")
+            fs_size = part_size + ota_size
         if args.fs_size is not None:
             fs_size = args.fs_size
         geo = Geometry(fs_size // SECTOR)
@@ -608,8 +653,9 @@ def main(argv=None):
             f.write(data)
         print("%s: FAT%d, %d bytes, volume %dK at offset 0x%06x%s"
               % (out, geo.fat_type, len(data), fs_size // 1024, offset,
-                 "" if args.no_storage_extend else " (storage extended)"))
-        print("flash with: esptool.py write_flash 0x%06x %s" % (offset, out))
+                 " (storage extended)" if args.storage_extend else ""))
+        print("flash with: esptool --before no-reset --after no-reset "
+              "write-flash 0x%06x %s" % (offset, out))
         return 0
 
     family = args.family_id
