@@ -621,7 +621,7 @@ def main(argv=None):
         return 0
 
     if args.self_extract:
-        import selfextract
+        from . import selfextract
         text, raw, biggest = selfextract.build(args.source)
         out = args.output or "code.py"
         with open(out, "w") as f:
@@ -732,6 +732,3 @@ def main(argv=None):
           % (nblocks, lo, hi, family))
     return 0
 
-
-if __name__ == "__main__":
-    sys.exit(main())

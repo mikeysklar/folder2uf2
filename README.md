@@ -4,9 +4,13 @@
 
 Ships a CircuitPython project as one file, so customers copy once.
 
-## Requirements
+## Install
 
-Python 3, standard library only. No dependencies.
+```sh
+pip install folder2uf2
+```
+
+Python 3.8 or newer, standard library only. No dependencies.
 
 ## Three ways to ship
 
