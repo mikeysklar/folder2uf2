@@ -44,6 +44,7 @@ Any board with `zlib` and `binascii`. Firmware does the writing.
 |---|---|---|
 | RP2040 | Metro RP2040 | yes |
 | RP2350 | Metro RP2350 | yes |
+| ESP32-S2 | Metro ESP32-S2 | yes |
 | ESP32-S3 | Metro ESP32-S3 | yes |
 | SAMD51 | Metro M4 AirLift | yes |
 | nRF52840 | Feather nRF52840 | yes |
