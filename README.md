@@ -36,7 +36,25 @@ folder2uf2 --self-extract -o code.py myproject/
 3. board reboots with code.py, lib/ and assets in place
 ```
 
-Works on every port, RP2 and ESP32 alike.
+### Ports
+
+Any board with `zlib` and `binascii`. Firmware does the writing.
+
+| Chip | Tested on | Self-extract |
+|---|---|---|
+| RP2040 | Metro RP2040 | yes |
+| RP2350 | Metro RP2350 | yes |
+| ESP32-S3 | Metro ESP32-S3 | yes |
+| SAMD51 | Metro M4 AirLift | yes |
+| nRF52840 | Feather nRF52840 | yes |
+| STM32F405 | Feather STM32F405 | yes |
+| SAMD21 | Metro M0 Express | no, lacks `zlib` |
+
+Every row was run on hardware, not inferred.
+
+SAMD, nRF and STM keep the filesystem on external QSPI. That changes nothing.
+
+`.uf2` and `.bin` output stay RP2 and ESP32 only.
 
 ### If it fails
 

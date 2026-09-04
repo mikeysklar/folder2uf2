@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "folder2uf2"
-version = "0.1.0"
+version = "0.1.1"
 description = "Ship a CircuitPython project as one file: a self-extracting code.py, a UF2 for RP2, or an image for ESP32"
 readme = "README.md"
 requires-python = ">=3.8"
